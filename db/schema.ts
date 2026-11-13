@@ -32,3 +32,8 @@ export const members = sqliteTable("members", {
   role: text("role").notNull(), status: text("status").notNull(), added: text("added").notNull(),
   lastSeen: text("last_seen"),
 }, t => [index("members_user_status").on(t.userId,t.status)]);
+export const invitationMail = sqliteTable("invitation_mail", {
+  email: text("email").primaryKey(), requestId: text("request_id").notNull(),
+  status: text("status").notNull().default("pending"), attempts: integer("attempts").notNull().default(0),
+  updated: text("updated").notNull(), sentAt: text("sent_at"), error: text("error"),
+});

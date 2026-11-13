@@ -20,6 +20,9 @@ for(const email of ['', 'invalid-email', 'x@example.com,y@example.com', 'a'.repe
 check((await request('team',{email:users.owner.email,action:'invite'})).status===400,'inviting owner cannot change owner role');
 const invitation=await request('team',{email:'  '+invited.email.toUpperCase()+'  ',action:'invite',role:'owner',user_id:'forged',status:'revoked'});
 check(invitation.status===200&&invitation.data.invitation.email===invited.email&&invitation.data.invitation.result==='invited','email is normalized and new invitation registered');
+check(invitation.data.invitation.mail.status==='not_configured'&&invitation.data.emailEnabled===false,'missing Gmail setup never claims successful email delivery');
+check((await request('team',{email:invited.email,action:'resend'},'guest')).status===403,'colleague cannot send invitation email');
+check((await request('team',{email:users.owner.email,action:'resend'})).status===409,'invitation sender cannot target owner');
 const member=invitation.data.members.find(m=>m.email===invited.email);
 check(member.role==='member'&&member.status==='active'&&!member.last_seen,'invitation cannot inject role identity or last login');
 const again=await request('team',{email:invited.email,action:'invite'});
@@ -29,6 +32,7 @@ check((await request('state',undefined,{...invited,id:'wrong-invited-id'})).stat
 const privateMade=await request('collections',{title:'재초대 보존 모음'},invited);
 await request('team',{email:invited.email,action:'revoke'});
 check((await request('state',undefined,invited)).status===403,'newly invited account can be suspended');
+check((await request('team',{email:invited.email,action:'resend'})).status===409,'suspended member cannot receive new invitation email');
 const reinvited=await request('team',{email:invited.email,action:'invite'});
 check(reinvited.data.invitation.result==='restored'&&(await request('collections/'+privateMade.data.id,undefined,invited)).status===200,'reinviting suspended email restores existing private collection');
 check((await request('state',undefined,{...invited,id:'wrong-invited-id'})).status===403,'reinvitation retains original identity binding');

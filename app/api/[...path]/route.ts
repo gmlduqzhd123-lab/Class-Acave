@@ -3,6 +3,8 @@ import {z} from 'zod';
 import {getChatGPTUser} from '../../chatgpt-auth';
 import {normalize,googleId} from '@/lib/importer.mjs';
 import {workspaceFor} from '@/lib/workspace';
+import {mailConfigured,sendInvitationMail} from '@/lib/invitation-mail';
+import type {MailResult} from '@/lib/invitation-mail';
 export const dynamic='force-dynamic';
 const str=z.string().max(60000),id=z.string().min(1).max(150);
 const web=z.string().max(2000).refine(v=>!v||/^https?:\/\//i.test(v));
@@ -32,9 +34,10 @@ async function handle(request:Request){
   if(path==='team'){
     if(!workspace.isAdmin)fail('동료 관리는 운영자만 할 수 있습니다.',403);
     const invitationEnabled=env.APP_MANAGED_INVITES==='enabled';
-    let invitation:{email:string;result:'invited'|'already_invited'|'restored'}|undefined;
+    let invitation:{email:string;result:'invited'|'already_invited'|'restored';mail?:MailResult}|undefined;
+    let mail:MailResult|undefined;
     if(request.method==='POST'){
-      const v=z.object({email:z.string().trim().toLowerCase().email().max(254),action:z.enum(['invite','revoke','restore'])}).parse(b),email=v.email;
+      const v=z.object({email:z.string().trim().toLowerCase().email().max(254),action:z.enum(['invite','revoke','restore','resend'])}).parse(b),email=v.email;
       const member=await first('SELECT role,status FROM members WHERE email=?',email);
       if(v.action==='invite'){
         if(!invitationEnabled)fail('앱 내 초대 설정이 아직 준비되지 않았습니다. 기존 동료의 사용 중지·재개는 이용할 수 있습니다.',409);
@@ -46,13 +49,18 @@ async function handle(request:Request){
           const inserted=await q("INSERT OR IGNORE INTO members (email,name,role,status,added) VALUES (?,'','member','active',?)",email,new Date().toISOString()).run();
           invitation={email,result:inserted.meta.changes?'invited':'already_invited'};
         }
+        invitation.mail=await sendInvitationMail(db,email,env,v.action==='invite'&&invitation.result==='restored');
+      }else if(v.action==='resend'){
+        if(!member||member.role==='owner'||member.status!=='active')fail('사용 중인 초대 교사에게만 메일을 보낼 수 있습니다.',409);
+        if(!invitationEnabled)fail('앱 내 초대 설정을 확인해 주세요.',409);
+        mail=await sendInvitationMail(db,email,env,true);
       }else{
         if(!member)fail('초대된 계정이 아닙니다.',404);
         if(member.role==='owner')fail('운영자 계정의 접근은 여기서 변경할 수 없습니다.',403);
         await q('UPDATE members SET status=? WHERE email=?',v.action==='revoke'?'revoked':'active',email).run();
       }
     }
-    return json({members:await all('SELECT email,name,role,status,last_seen FROM members ORDER BY role DESC,added,email'),invitationEnabled,invitation});
+    return json({members:await all('SELECT m.email,m.name,m.role,m.status,m.last_seen,d.status mail_status,d.sent_at mail_sent_at FROM members m LEFT JOIN invitation_mail d ON d.email=m.email ORDER BY m.role DESC,m.added,m.email'),invitationEnabled,invitation,mail,emailEnabled:mailConfigured(env)});
   }
   if(path==='state'&&request.method==='GET'){
     const [sources,collections,sharedCollections,subjects,total,team]=await Promise.all([
