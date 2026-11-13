@@ -31,13 +31,28 @@ async function handle(request:Request){
   if((path==='google'||path.startsWith('import/'))&&!workspace.isAdmin)fail('공용 자료 가져오기는 운영자만 할 수 있습니다.',403);
   if(path==='team'){
     if(!workspace.isAdmin)fail('동료 관리는 운영자만 할 수 있습니다.',403);
+    const invitationEnabled=env.APP_MANAGED_INVITES==='enabled';
+    let invitation:{email:string;result:'invited'|'already_invited'|'restored'}|undefined;
     if(request.method==='POST'){
-      const v=z.object({email:z.string().email().max(254),action:z.enum(['revoke','restore'])}).parse(b),email=v.email.toLowerCase();
-      const member=await first('SELECT role FROM members WHERE email=?',email);if(!member)fail('초대된 계정이 아닙니다.',404);
-      if(member.role==='owner')fail('운영자 계정의 접근은 여기서 변경할 수 없습니다.',403);
-      await q('UPDATE members SET status=? WHERE email=?',v.action==='revoke'?'revoked':'active',email).run();
+      const v=z.object({email:z.string().trim().toLowerCase().email().max(254),action:z.enum(['invite','revoke','restore'])}).parse(b),email=v.email;
+      const member=await first('SELECT role,status FROM members WHERE email=?',email);
+      if(v.action==='invite'){
+        if(!invitationEnabled)fail('앱 내 초대 설정이 아직 준비되지 않았습니다. 기존 동료의 사용 중지·재개는 이용할 수 있습니다.',409);
+        if(member?.role==='owner')fail('운영자는 이미 이 공간을 사용하고 있습니다. 동료의 이메일을 입력해 주세요.');
+        if(member){
+          invitation={email,result:member.status==='active'?'already_invited':'restored'};
+          if(member.status!=='active')await q("UPDATE members SET status='active' WHERE email=? AND role='member'",email).run();
+        }else{
+          const inserted=await q("INSERT OR IGNORE INTO members (email,name,role,status,added) VALUES (?,'','member','active',?)",email,new Date().toISOString()).run();
+          invitation={email,result:inserted.meta.changes?'invited':'already_invited'};
+        }
+      }else{
+        if(!member)fail('초대된 계정이 아닙니다.',404);
+        if(member.role==='owner')fail('운영자 계정의 접근은 여기서 변경할 수 없습니다.',403);
+        await q('UPDATE members SET status=? WHERE email=?',v.action==='revoke'?'revoked':'active',email).run();
+      }
     }
-    return json({members:await all('SELECT email,name,role,status,last_seen FROM members ORDER BY role DESC,added,email')});
+    return json({members:await all('SELECT email,name,role,status,last_seen FROM members ORDER BY role DESC,added,email'),invitationEnabled,invitation});
   }
   if(path==='state'&&request.method==='GET'){
     const [sources,collections,sharedCollections,subjects,total,team]=await Promise.all([

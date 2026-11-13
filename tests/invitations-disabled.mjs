@@ -1,0 +1,12 @@
+import assert from 'node:assert/strict';
+const base=process.env.ARCHIVE_TEST_URL||'http://127.0.0.1:8788';
+if(!['127.0.0.1','localhost'].includes(new URL(base).hostname))throw new Error('Local tests only.');
+const headers={'oai-authenticated-user-id':'local_seedy','oai-authenticated-user-email':'seedy@sites.test','Content-Type':'application/json',Origin:base};
+const email='disabled.'+crypto.randomUUID()+'@sites.test';
+const initial=await fetch(base+'/api/team',{headers}).then(r=>r.json());
+assert.equal(initial.invitationEnabled,false);
+const blocked=await fetch(base+'/api/team',{method:'POST',headers,body:JSON.stringify({action:'invite',email})});
+assert.equal(blocked.status,409);
+const after=await fetch(base+'/api/team',{headers}).then(r=>r.json());
+assert.equal(after.members.some(m=>m.email===email),false);
+console.log('PASS disabled invitation mode rejects new email without changing membership.');

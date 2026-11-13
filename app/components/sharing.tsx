@@ -1,6 +1,7 @@
 'use client';
 import {useEffect,useState} from 'react';
-import {Users,Share2,Folder,ArrowUpRight,Copy,LockKeyhole,Check,LoaderCircle} from 'lucide-react';
+import type {FormEvent} from 'react';
+import {Users,UserPlus,Folder,ArrowUpRight,Copy,LockKeyhole,Check,LoaderCircle} from 'lucide-react';
 import Modal from './modal';
 import {api} from '@/lib/archive';
 import type {Collection} from '@/lib/archive';
@@ -18,11 +19,34 @@ export function ShareDialog({collection,onClose,onSaved}:{collection:Collection;
 }
 
 type Member={email:string;name:string;role:string;status:string;last_seen:string|null};
+type Invitation={email:string;result:'invited'|'already_invited'|'restored'};
+type TeamResponse={members:Member[];invitationEnabled:boolean;invitation?:Invitation};
 export function TeamPanel({isAdmin}:{isAdmin:boolean}){
  const [members,setMembers]=useState<Member[]>([]),[busy,setBusy]=useState(''),[message,setMessage]=useState(''),[loading,setLoading]=useState(true);
- useEffect(()=>{if(!isAdmin)return;let live=true;api<{members:Member[]}>('team').then(r=>{if(live)setMembers(r.members);}).catch(e=>{if(live)setMessage(e.message);}).finally(()=>{if(live)setLoading(false);});return()=>{live=false;};},[isAdmin]);
- async function status(member:Member){setBusy(member.email);setMessage('');try{const r=await api<{members:Member[]}>('team',{email:member.email,action:member.status==='active'?'revoke':'restore'});setMembers(r.members);setMessage(member.status==='active'?'이 공간의 사용을 중지했어요.':'이 공간을 다시 사용할 수 있어요.');}catch(e:any){setMessage(e.message);}finally{setBusy('');}}
- async function copy(){try{await navigator.clipboard.writeText(location.origin+'/?view=shared');setMessage('접속 주소를 복사했어요. 초대받은 계정으로 로그인해야 합니다.');}catch{setMessage('접속 주소를 복사하지 못했습니다. 브라우저 주소를 복사해 주세요.');}}
+ const [email,setEmail]=useState(''),[enabled,setEnabled]=useState(false),[invitation,setInvitation]=useState<Invitation|null>(null);
+ useEffect(()=>{if(!isAdmin)return;let live=true;api<TeamResponse>('team').then(r=>{if(live){setMembers(r.members);setEnabled(r.invitationEnabled);}}).catch(e=>{if(live)setMessage(e.message);}).finally(()=>{if(live)setLoading(false);});return()=>{live=false;};},[isAdmin]);
+ async function invite(event:FormEvent<HTMLFormElement>){
+  event.preventDefault();if(busy||!enabled)return;setBusy('invite');setMessage('');setInvitation(null);
+  try{const r=await api<TeamResponse>('team',{email,action:'invite'});setMembers(r.members);setInvitation(r.invitation||null);setEmail('');setMessage(r.invitation?.result==='already_invited'?'이미 초대된 이메일입니다. 접속 안내를 다시 전달할 수 있어요.':r.invitation?.result==='restored'?'다시 초대했어요. 기존 모음과 메모는 그대로 유지됩니다.':'초대를 등록했어요. 아래 안내를 복사해 동료에게 전달해 주세요.');}catch(e:unknown){setMessage(e instanceof Error?e.message:'초대를 등록하지 못했습니다. 다시 시도해 주세요.');}finally{setBusy('');}
+ }
+ async function status(member:Member){setBusy(member.email);setMessage('');try{const r=await api<TeamResponse>('team',{email:member.email,action:member.status==='active'?'revoke':'restore'});setMembers(r.members);if(invitation?.email===member.email)setInvitation(null);setMessage(member.status==='active'?'이 공간의 사용을 중지했어요.':'이 공간을 다시 사용할 수 있어요.');}catch(e:unknown){setMessage(e instanceof Error?e.message:'사용 상태를 변경하지 못했습니다. 다시 시도해 주세요.');}finally{setBusy('');}}
+ async function copy(withMessage=false){try{const url=location.origin+'/?view=shared';await navigator.clipboard.writeText(withMessage&&invitation?`수업서랍에 초대했어요.\n${invitation.email} 계정으로 ChatGPT 로그인해 주세요.\n공용 자료를 검색하고 동료의 수업 자료 모음을 함께 볼 수 있어요.\n${url}`:url);setMessage(withMessage?'초대 안내를 복사했어요. 동료에게 전달해 주세요.':'접속 주소를 복사했어요. 초대받은 계정으로 로그인해야 합니다.');}catch{setMessage('복사하지 못했습니다. 아래 접속 주소를 직접 복사해 주세요.');}}
  if(!isAdmin)return <div className="notice">동료의 접근 계정은 운영자가 관리합니다.</div>;
- return <><div className="source-intro"><Users size={25}/><div><strong>초대받은 계정으로 함께 쓰는 공간</strong><p>공용 자료는 함께 보고, 개인 모음은 공유를 켜기 전까지 비공개로 유지됩니다.</p></div></div><div className="team-toolbar"><h2>초대된 교사 <span>{members.length}</span></h2><button className="button" onClick={copy}><Copy size={15}/>접속 주소 복사</button></div>{loading?<div className="loading"><LoaderCircle className="spin"/>동료 목록을 확인하고 있어요.</div>:<div className="team-list">{members.map(member=><article className="team-member" key={member.email}><span className="avatar">{(member.name||member.email).slice(0,1)}</span><div className="team-member-name"><strong>{member.name||'초대된 교사'}</strong><p>{member.email}</p></div><span className={`member-state ${member.status==='active'?'':'stopped'}`}>{member.role==='owner'?'운영자':member.status!=='active'?'사용 중지':member.last_seen?'사용 중':'첫 로그인 전'}</span>{member.role!=='owner'?<button className="button" disabled={Boolean(busy)} onClick={()=>status(member)}>{busy===member.email?'처리 중…':member.status==='active'?'사용 중지':'사용 재개'}</button>:null}</article>)}</div>}<p className="source-footnote">접속 주소만으로 가입되지는 않습니다. 사이트에 초대된 이메일 계정으로 로그인해야 하며, 사용 중지된 계정은 자료와 공유 모음을 열 수 없습니다.</p>{message?<p className="sharing-message" role="status">{message}</p>:null}</>;
+ return <>
+  <div className="source-intro"><Users size={25}/><div><strong>초대받은 계정으로 함께 쓰는 공간</strong><p>공용 자료는 함께 보고, 개인 모음은 공유를 켜기 전까지 비공개로 유지됩니다.</p></div></div>
+  <section className="invite-card" aria-labelledby="invite-heading">
+   <div className="invite-heading"><span><UserPlus size={22}/></span><div><h2 id="invite-heading">동료 교사 초대</h2><p>동료가 ChatGPT 로그인에 사용하는 이메일을 입력해 주세요.</p></div></div>
+   <form onSubmit={invite}>
+    <label className="field-label" htmlFor="invite-email">동료 교사 이메일</label>
+    <div className="invite-form-row"><input id="invite-email" name="email" type="email" autoComplete="off" autoCapitalize="none" spellCheck={false} required maxLength={254} value={email} disabled={loading||Boolean(busy)||!enabled} onChange={e=>setEmail(e.target.value)} placeholder="teacher@example.com" aria-describedby="invite-help"/><button className="button primary" type="submit" disabled={loading||Boolean(busy)||!enabled||!email.trim()}>{busy==='invite'?<LoaderCircle size={16} className="spin"/>:<UserPlus size={16}/>}초대 등록</button></div>
+    <p id="invite-help" className="invite-help">등록하면 해당 계정으로 바로 이용할 수 있습니다. 안내 메일은 자동 발송되지 않으니 초대 안내를 복사해 전달해 주세요.</p>
+   </form>
+   {!loading&&!enabled?<div className="notice">앱 내 초대를 활성화할 준비를 하고 있습니다. 기존 동료의 사용 중지·재개는 아래에서 이용할 수 있어요.</div>:null}
+   {invitation?<div className="invite-result"><Check size={19}/><div><strong>{invitation.email}</strong><p>{invitation.result==='already_invited'?'이미 초대된 계정이에요.':'초대 등록이 완료됐어요.'} 이 이메일로 로그인하면 함께 사용할 수 있습니다.</p><label className="sr-only" htmlFor="invite-link">초대 접속 주소</label><input id="invite-link" readOnly value={typeof location==='undefined'?'':location.origin+'/?view=shared'}/><div className="invite-result-actions"><button className="button" onClick={()=>copy(true)}><Copy size={14}/>초대 안내 복사</button><button className="text-btn" onClick={()=>copy()}>주소만 복사</button></div></div></div>:null}
+   {message?<p className="sharing-message" role="status">{message}</p>:null}
+  </section>
+  <div className="team-toolbar"><h2>함께 쓰는 교사 <span>{members.length}</span></h2><button className="button" onClick={()=>copy()}><Copy size={15}/>접속 주소 복사</button></div>
+  {loading?<div className="loading"><LoaderCircle className="spin"/>동료 목록을 확인하고 있어요.</div>:<div className="team-list">{members.map(member=><article className="team-member" key={member.email}><span className="avatar">{(member.name||member.email).slice(0,1)}</span><div className="team-member-name"><strong>{member.name||'초대된 교사'}</strong><p>{member.email}</p></div><span className={`member-state ${member.status==='active'?'':'stopped'}`}>{member.role==='owner'?'운영자':member.status!=='active'?'사용 중지':member.last_seen?'사용 중':'첫 로그인 전'}</span>{member.role!=='owner'?<button className="button" disabled={Boolean(busy)} onClick={()=>status(member)}>{busy===member.email?'처리 중…':member.status==='active'?'사용 중지':'사용 재개'}</button>:null}</article>)}</div>}
+  <p className="source-footnote">접속 주소만으로 가입되지는 않습니다. 초대한 이메일 계정으로 로그인해야 하며, 사용 중지된 계정은 자료와 공유 모음을 열 수 없습니다.</p>
+ </>;
 }

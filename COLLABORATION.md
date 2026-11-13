@@ -2,7 +2,9 @@
 
 ## 사용 방법
 
-1. 초대받은 교사는 초대에 사용된 이메일 계정으로 ChatGPT 로그인합니다.
+1. 운영자는 앱의 `동료 관리`에서 동료의 ChatGPT 로그인 이메일을 입력하고 `초대 등록`을 누릅니다.
+2. `초대 안내 복사`를 눌러 동료에게 전달합니다. 안내 메일은 자동 발송되지 않습니다.
+3. 초대받은 교사는 초대에 사용된 이메일 계정으로 ChatGPT 로그인합니다.
 2. 공용 자료 1,574개를 함께 검색하고, 각자 `내 자료 모음`을 만듭니다.
 3. 모음의 `공유 설정`에서 `초대된 동료와 공유`를 선택합니다.
 4. `동료에게 전할 말`을 입력하고 설정을 저장합니다.
@@ -21,20 +23,24 @@
 | 본인 모음 공유·해제 | 가능 | 가능 |
 | 동료 공유 모음 보기·복사 | 가능 | 가능 |
 | 동료의 모음 직접 수정 | 불가 | 불가 |
+| 이메일로 동료 초대 | 가능 | 불가 |
 | 초대된 계정 사용 중지·재개 | 가능 | 불가 |
 
 운영자도 동료의 비공개 모음과 개인 메모를 열 수 없습니다. 중지된 계정은 API에 접근할 수 없고 해당 교사의 공유 모음도 공유 목록에서 제외됩니다. 사용 재개 시 기존 개인 기록은 유지됩니다.
 
 ## 초대 운영
 
-사이트 자체의 이메일 접근 허용과 초대는 Sites에서 관리합니다. 앱은 운영자가 등록한 이메일과 로그인한 계정의 고유 ID를 연결합니다. 접속 주소나 공유 주소만 아는 사람에게 권한이 생기지 않습니다.
+앱은 운영자가 등록한 이메일과 Sites가 확인한 로그인 계정의 고유 ID를 연결합니다. 접속 주소나 공유 주소만 아는 사람에게 권한이 생기지 않습니다. 모든 API와 서버 페이지에서 활성 회원 여부를 확인합니다. 운영자도 동료의 비공개 모음을 읽을 수 없습니다.
 
-새로운 동료를 추가할 때는 다음 두 항목을 함께 설정합니다.
+앱 내 초대를 처음 활성화할 때만 다음 설정이 필요합니다. 실제 접근 모드 전환은 소유자의 명시적인 동의를 받은 뒤 적용합니다.
 
-- Sites의 기존 `custom` 접근 목록에 동료의 이메일을 추가합니다. 기존 소유자·사용자·그룹은 보존합니다.
-- `WORKSPACE_INVITE_EMAILS` 환경변수에 동일한 이메일을 추가하고 새 버전을 배포합니다.
+- Sites 접근 모드는 `public`으로 설정해 새 초대 교사가 로그인 입구에 접근할 수 있게 합니다. 자료 공개를 뜻하지 않으며, 미로그인 API는 401, 초대되지 않거나 중지된 계정은 403으로 거절합니다. 미초대 계정의 서버 페이지에는 접근 안내만 표시합니다.
+- `APP_MANAGED_INVITES="enabled"`를 런타임 환경변수에 설정하고 회원 검사를 포함한 버전을 배포합니다. 기본값은 비활성이며, 비활성 상태에서 새 초대 요청은 409로 거절합니다.
+- `WORKSPACE_OWNER_EMAIL`과 최초 운영자 연결은 유지합니다. 기존 Sites 사용자·그룹 허용 목록은 지우지 않습니다.
 
-앱의 `동료 관리`는 이미 등록된 계정의 사용 중지·재개와 접속 주소 복사를 제공합니다. 임의의 이메일을 새로 등록하는 초대 발송 폼은 포함하지 않습니다.
+이후 새 동료는 앱에서 이메일만 등록하면 됩니다. Sites 설정이나 환경변수 수정·재배포가 필요하지 않습니다. 이메일의 앞뒤 공백과 대소문자는 정규화합니다. 같은 이메일을 다시 등록해도 중복 계정이 생기지 않으며, 중지한 이메일을 재초대하면 기존 모음·메모와 계정 연결을 유지한 채 접근을 복원합니다. 새 계정은 항상 일반 교사 권한입니다. 초대 안내는 직접 전달하는 방식이며 자동 이메일 발송 기능은 없습니다.
+
+`WORKSPACE_INVITE_EMAILS`는 기존 초대 계정의 초기 등록 호환용으로 남아 있습니다. 등록된 행을 덮어쓰지 않으므로 앱에서 중지한 계정을 자동 복원하지 않습니다.
 
 `WORKSPACE_OWNER_EMAIL`에는 실제 운영자의 로그인 이메일을 지정합니다. 최초 공용 공간 연결은 이 계정만 할 수 있습니다. 기존 운영자의 자료·모음·메모는 그대로 보존하며, 기존 모음을 자동으로 공유하지 않습니다.
 
@@ -47,6 +53,7 @@
 ```dotenv
 WORKSPACE_OWNER_EMAIL="seedy@sites.test"
 WORKSPACE_INVITE_EMAILS='["colleague@sites.test","second@sites.test"]'
+APP_MANAGED_INVITES="enabled"
 ```
 
 신규 로컬 DB는 `0000_premium_silver_sable.sql`, `0001_magenta_winter_soldier.sql` 순서로 적용합니다. 기존 DB에는 미적용된 `0001`만 적용합니다. 적용한 SQL을 다시 실행하지 않습니다.
@@ -54,19 +61,21 @@ WORKSPACE_INVITE_EMAILS='["colleague@sites.test","second@sites.test"]'
 별도의 테스트 DB는 `.wrangler/collab-test`를 사용합니다. 빌드한 Worker로 API 통합 검증 시 아래와 같이 가상 환경변수를 명시합니다. 개발 미리보기와 배포 환경의 데이터는 서로 별개입니다.
 
 ```powershell
-node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js dev --config dist/server/wrangler.json --local --persist-to .wrangler/collab-test --ip 127.0.0.1 --inspector-port 0 --port 8788 --var 'WORKSPACE_OWNER_EMAIL:seedy@sites.test' --var 'WORKSPACE_INVITE_EMAILS:["colleague@sites.test","second@sites.test"]'
+node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js dev --config dist/server/wrangler.json --local --persist-to .wrangler/collab-test --ip 127.0.0.1 --inspector-port 0 --port 8788 --var 'WORKSPACE_OWNER_EMAIL:seedy@sites.test' --var 'WORKSPACE_INVITE_EMAILS:["colleague@sites.test","second@sites.test"]' --var 'APP_MANAGED_INVITES:enabled'
 ```
 
 다른 터미널에서 `node tests/api.integration.mjs`를 실행합니다. 이 검증은 로컬 주소에서만 실행되고 가상 계정으로 테스트 데이터를 생성합니다.
 
 ## 확인한 동작
 
-- API·공유 권한 검증 56개 통과
+- API·초대·공유 권한 검증 76개 통과
+- 초대 기능 비활성 상태에서 등록 거절·회원 미생성 확인 (`APP_MANAGED_INVITES:disabled` 서버에서 `node tests/invitations-disabled.mjs`)
 - 자료 변환 검증 9개 통과 (실제 엑셀 파일 포함)
 - 다른 사용자 소유의 비공개 모음 차단
 - 공유 응답과 복사본에서 개인 메모 제외
 - 공유받은 모음의 모든 수정 동작 차단
 - 공유 해제 후 직접 주소와 목록에서 열람 중지
 - 계정 중지·복원, 재가져오기 후 모음·메모 보존
+- 이메일 정규화·중복 초대·재초대, 운영자 권한 주입 거절, 미초대 서버 페이지 차단
 
 운영 환경의 실제 계정 로그인·초대와 브라우저 동작은 배포 후 별도로 확인합니다.

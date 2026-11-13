@@ -41,7 +41,7 @@ XLSX 형식은 한 셀 안의 여러 개별 하이퍼링크를 모두 표현하�
 - Cloudflare Workers + D1 (SQLite)
 - Drizzle의 SQL 스키마 마이그레이션
 - fflate / fast-xml-parser를 지연 로딩하는 브라우저 XLSX 변환기
-- Sites의 로그인·비공개 접근 제어
+- Sites의 로그인과 서버의 초대 이메일·계정 권한 확인
 
 데이터는 D1에 저장하며 브라우저 localStorage에 자료·모음을 저장하지 않습니다. 원본 자료와 사용자 데이터는 소스 저장소·배포 번들에 포함하지 않습니다. API는 요청마다 로그인 사용자와 자료 소유자를 확인합니다.
 

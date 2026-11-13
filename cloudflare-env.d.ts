@@ -4,5 +4,6 @@ declare namespace Cloudflare {
     BUCKET?: R2Bucket;
     WORKSPACE_OWNER_EMAIL?: string;
     WORKSPACE_INVITE_EMAILS?: string;
+    APP_MANAGED_INVITES?: string;
   }
 }
