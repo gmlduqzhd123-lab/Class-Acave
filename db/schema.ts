@@ -16,9 +16,19 @@ export const resources = sqliteTable("resources", {
 export const collections = sqliteTable("collections", {
   id: text("id").primaryKey(), owner: text("owner").notNull(), title: text("title").notNull(),
   description: text("description").notNull(), created: text("created").notNull(),
+  workspace: text("workspace"), shared: integer("shared").notNull().default(0),
 }, t => [index("collections_owner").on(t.owner)]);
 export const items = sqliteTable("items", {
   collection: text("collection").notNull(), resource: text("resource").notNull(),
   owner: text("owner").notNull(), snapshot: text("snapshot").notNull(),
   note: text("note").notNull(), position: integer("position").notNull(),
 }, t => [primaryKey({columns:[t.collection,t.resource]}), index("items_owner_collection").on(t.owner,t.collection)]);
+export const workspaces = sqliteTable("workspaces", {
+  id: text("id").primaryKey(), ownerId: text("owner_id").notNull(), ownerEmail: text("owner_email").notNull(),
+  title: text("title").notNull(), created: text("created").notNull(),
+});
+export const members = sqliteTable("members", {
+  email: text("email").primaryKey(), userId: text("user_id"), name: text("name").notNull().default(""),
+  role: text("role").notNull(), status: text("status").notNull(), added: text("added").notNull(),
+  lastSeen: text("last_seen"),
+}, t => [index("members_user_status").on(t.userId,t.status)]);

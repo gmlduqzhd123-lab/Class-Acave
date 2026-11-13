@@ -2,6 +2,7 @@ import {env} from 'cloudflare:workers';
 import {z} from 'zod';
 import {getChatGPTUser} from '../../chatgpt-auth';
 import {normalize,googleId} from '@/lib/importer.mjs';
+import {workspaceFor} from '@/lib/workspace';
 export const dynamic='force-dynamic';
 const str=z.string().max(60000),id=z.string().min(1).max(150);
 const web=z.string().max(2000).refine(v=>!v||/^https?:\/\//i.test(v));
@@ -26,16 +27,30 @@ async function handle(request:Request){
     if(!request.headers.get('Content-Type')?.startsWith('application/json'))return json({error:'JSON 요청이 필요합니다.'},415);
     b=JSON.parse(text);
   }
+  const workspace=await workspaceFor(db,user,env),catalogOwner=workspace.catalogOwner;
+  if((path==='google'||path.startsWith('import/'))&&!workspace.isAdmin)fail('공용 자료 가져오기는 운영자만 할 수 있습니다.',403);
+  if(path==='team'){
+    if(!workspace.isAdmin)fail('동료 관리는 운영자만 할 수 있습니다.',403);
+    if(request.method==='POST'){
+      const v=z.object({email:z.string().email().max(254),action:z.enum(['revoke','restore'])}).parse(b),email=v.email.toLowerCase();
+      const member=await first('SELECT role FROM members WHERE email=?',email);if(!member)fail('초대된 계정이 아닙니다.',404);
+      if(member.role==='owner')fail('운영자 계정의 접근은 여기서 변경할 수 없습니다.',403);
+      await q('UPDATE members SET status=? WHERE email=?',v.action==='revoke'?'revoked':'active',email).run();
+    }
+    return json({members:await all('SELECT email,name,role,status,last_seen FROM members ORDER BY role DESC,added,email')});
+  }
   if(path==='state'&&request.method==='GET'){
-    const [sources,collections,subjects,total]=await Promise.all([
-      all('SELECT s.id,s.title,s.url,s.updated,(SELECT count(*) FROM resources r WHERE r.owner=s.owner AND r.run=s.active_run) count FROM sources s WHERE s.owner=? AND s.active_run IS NOT NULL ORDER BY updated DESC',owner),
-      all('SELECT c.id,c.title,c.description,(SELECT count(*) FROM items i WHERE i.owner=c.owner AND i.collection=c.id) count FROM collections c WHERE c.owner=? ORDER BY c.created DESC',owner),
-      all('SELECT r.subject name,count(*) count'+active+' GROUP BY r.subject ORDER BY count DESC',owner),
-      first('SELECT count(*) n'+active,owner)
-    ]);return json({sources,collections,subjects,total:total.n});
+    const [sources,collections,sharedCollections,subjects,total,team]=await Promise.all([
+      all('SELECT s.id,s.title,s.url,s.updated,(SELECT count(*) FROM resources r WHERE r.owner=s.owner AND r.run=s.active_run) count FROM sources s WHERE s.owner=? AND s.active_run IS NOT NULL ORDER BY updated DESC',catalogOwner),
+      all('SELECT c.id,c.title,c.description,c.shared,(SELECT count(*) FROM items i WHERE i.owner=c.owner AND i.collection=c.id) count FROM collections c WHERE c.owner=? ORDER BY c.created DESC',owner),
+      all("SELECT c.id,c.title,c.description,c.shared,c.owner,(SELECT name FROM members m WHERE m.user_id=c.owner AND m.status='active' LIMIT 1) ownerName,(SELECT count(*) FROM items i WHERE i.owner=c.owner AND i.collection=c.id) count FROM collections c WHERE c.workspace=? AND c.shared=1 AND EXISTS (SELECT 1 FROM members m WHERE m.user_id=c.owner AND m.status='active') ORDER BY c.created DESC",workspace.id),
+      all('SELECT r.subject name,count(*) count'+active+' GROUP BY r.subject ORDER BY count DESC',catalogOwner),
+      first('SELECT count(*) n'+active,catalogOwner),
+      first("SELECT count(*) n FROM members WHERE status='active'")
+    ]);return json({sources,collections:collections.map(c=>({...c,canEdit:true})),sharedCollections:sharedCollections.map(({owner:creator,...c})=>({...c,canEdit:creator===owner})),subjects,total:total.n,workspace:{title:workspace.title,isAdmin:workspace.isAdmin,teamSize:team.n}});
   }
   if(path==='resources'&&request.method==='GET'){
-    const args:(string|number)[]=[owner];let where=active;
+    const args:(string|number)[]=[catalogOwner];let where=active;
     const tokens=String(url.searchParams.get('q')||'').slice(0,150).split(/\s+/).map(normalize).filter(Boolean).slice(0,8);
     for(const token of tokens){where+=' AND instr(r.search,?)>0';args.push(token);}
     for(const [key,col] of [['subject','subject'],['kind','kind']] as const){const v=url.searchParams.get(key);if(v){where+=` AND r.${col}=?`;args.push(v.slice(0,120));}}
@@ -83,18 +98,31 @@ async function handle(request:Request){
   }
   if(path==='collections'&&request.method==='POST'){
     const v=z.object({title:z.string().trim().min(1).max(80),description:z.string().max(1000).default(''),resourceId:id.optional()}).parse(b),cid=crypto.randomUUID();
-    const operations=[q('INSERT INTO collections (id,owner,title,description,created) VALUES (?,?,?,?,?)',cid,owner,v.title,v.description,new Date().toISOString())];
-    if(v.resourceId){const r=await first('SELECT r.data'+active+' AND r.id=? LIMIT 1',owner,v.resourceId);if(!r)fail('현재 자료를 찾을 수 없습니다.',404);operations.push(q('INSERT INTO items (collection,resource,owner,snapshot,note,position) VALUES (?,?,?,?,?,0)',cid,v.resourceId,owner,r.data,''));}
+    const operations=[q('INSERT INTO collections (id,owner,title,description,created,workspace,shared) VALUES (?,?,?,?,?,?,0)',cid,owner,v.title,v.description,new Date().toISOString(),workspace.id)];
+    if(v.resourceId){const r=await first('SELECT r.data'+active+' AND r.id=? LIMIT 1',catalogOwner,v.resourceId);if(!r)fail('현재 자료를 찾을 수 없습니다.',404);operations.push(q('INSERT INTO items (collection,resource,owner,snapshot,note,position) VALUES (?,?,?,?,?,0)',cid,v.resourceId,owner,r.data,''));}
     await db.batch(operations);return json({id:cid});
   }
   if(path.startsWith('collections/')){
-    const cid=id.parse(path.split('/')[1]),collection=await first('SELECT * FROM collections WHERE id=? AND owner=?',cid,owner);if(!collection)fail('자료 모음을 찾을 수 없습니다.',404);
+    const cid=id.parse(path.split('/')[1]),collection=await first("SELECT c.*,(SELECT name FROM members m WHERE m.user_id=c.owner AND m.status='active' LIMIT 1) owner_name FROM collections c WHERE c.id=? AND (c.owner=? OR (c.shared=1 AND c.workspace=? AND EXISTS (SELECT 1 FROM members m WHERE m.user_id=c.owner AND m.status='active')))",cid,owner,workspace.id);if(!collection)fail('자료 모음을 찾을 수 없습니다.',404);
+    const canEdit=collection.owner===owner;
     if(request.method==='GET'){
-      const rows=await all('SELECT i.*,r.data latest FROM items i LEFT JOIN resources r ON r.owner=i.owner AND r.id=i.resource AND r.run=(SELECT s.active_run FROM sources s WHERE s.owner=i.owner AND s.id=json_extract(i.snapshot,\'$.sourceId\')) WHERE i.collection=? AND i.owner=? ORDER BY i.position,i.resource',cid,owner);
-      return json({collection:{id:cid,title:collection.title,description:collection.description},items:rows.map(r=>({resource:JSON.parse(r.latest||r.snapshot),note:r.note,position:r.position,missing:!r.latest}))});
+      const rows=await all('SELECT i.*,r.data latest FROM items i LEFT JOIN resources r ON r.owner=? AND r.id=i.resource AND r.run=(SELECT s.active_run FROM sources s WHERE s.owner=? AND s.id=json_extract(i.snapshot,\'$.sourceId\')) WHERE i.collection=? AND i.owner=? ORDER BY i.position,i.resource',catalogOwner,catalogOwner,cid,collection.owner);
+      return json({collection:{id:cid,title:collection.title,description:collection.description,shared:collection.shared,canEdit,ownerName:collection.owner_name},items:rows.map(r=>({resource:JSON.parse(r.latest||r.snapshot),note:canEdit?r.note:'',position:r.position,missing:!r.latest}))});
+    }
+    if(b.action==='copy'){
+      const copyId=crypto.randomUUID(),title=(collection.title+' (복사)').slice(0,80);
+      await db.batch([
+        q('INSERT INTO collections (id,owner,title,description,created,workspace,shared) VALUES (?,?,?,?,?,?,0)',copyId,owner,title,collection.description,new Date().toISOString(),workspace.id),
+        q("INSERT INTO items (collection,resource,owner,snapshot,note,position) SELECT ?,resource,?,snapshot,'',position FROM items WHERE collection=? AND owner=?",copyId,owner,cid,collection.owner)
+      ]);return json({id:copyId});
+    }
+    if(!canEdit)fail('공유받은 모음은 읽기 전용입니다. 내 모음으로 복사해서 편집해 주세요.',403);
+    if(b.action==='share'){
+      const v=z.object({shared:z.boolean(),description:z.string().max(1000)}).parse(b);
+      await q('UPDATE collections SET shared=?,workspace=?,description=? WHERE id=? AND owner=?',v.shared?1:0,workspace.id,v.description,cid,owner).run();return json({ok:true});
     }
     if(b.action==='add'){
-      const rid=id.parse(b.resourceId),r=await first('SELECT r.data'+active+' AND r.id=? LIMIT 1',owner,rid);if(!r)fail('현재 자료를 찾을 수 없습니다.',404);
+      const rid=id.parse(b.resourceId),r=await first('SELECT r.data'+active+' AND r.id=? LIMIT 1',catalogOwner,rid);if(!r)fail('현재 자료를 찾을 수 없습니다.',404);
       await q('INSERT OR IGNORE INTO items (collection,resource,owner,snapshot,note,position) VALUES (?,?,?,?,?,(SELECT coalesce(max(position),-1)+1 FROM items WHERE collection=? AND owner=?))',cid,rid,owner,r.data,'',cid,owner).run();
     }else if(b.action==='remove')await q('DELETE FROM items WHERE collection=? AND owner=? AND resource=?',cid,owner,id.parse(b.resourceId)).run();
     else if(b.action==='note')await q('UPDATE items SET note=? WHERE collection=? AND owner=? AND resource=?',z.string().max(20000).parse(b.note),cid,owner,id.parse(b.resourceId)).run();
