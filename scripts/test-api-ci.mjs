@@ -1,45 +1,24 @@
 import {spawn,spawnSync} from 'node:child_process';
-import {mkdirSync,mkdtempSync,readdirSync} from 'node:fs';
+import {mkdirSync,mkdtempSync,readdirSync,readFileSync} from 'node:fs';
+import {DatabaseSync} from 'node:sqlite';
 import {createServer} from 'node:net';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-
 const root=fileURLToPath(new URL('../',import.meta.url));
-const wrangler=path.join(root,'node_modules/wrangler/bin/wrangler.js');
-const prefix=['--import',new URL('./sites-env.mjs',import.meta.url).href,wrangler];
-mkdirSync(path.join(root,'.wrangler'),{recursive:true});
-const state=mkdtempSync(path.join(root,'.wrangler/api-ci-'));
-async function run(args,options={}){
- const child=spawn(process.execPath,args,{cwd:root,windowsHide:true,stdio:options.quiet?['ignore','pipe','pipe']:'inherit',env:options.env||process.env});
- let output='';if(options.quiet){child.stdout.on('data',chunk=>{output+=chunk;});child.stderr.on('data',chunk=>{output+=chunk;});}
- await new Promise((resolve,reject)=>{child.once('error',reject);child.once('close',code=>{if(code===0)resolve();else reject(new Error(`Command failed (${code})\n${output.slice(-12000)}`));});});
-}
-for(const file of readdirSync(path.join(root,'drizzle')).filter(file=>/^\d+.*\.sql$/.test(file)).sort()){
- await run([...prefix,'d1','execute','DB','--local','--config','dist/server/wrangler.json','--persist-to',state,'--file',path.join(root,'drizzle',file)],{quiet:true});
- console.log('Applied local test migration '+file);
-}
+mkdirSync(path.join(root,'.sites-runtime'),{recursive:true});
+const state=mkdtempSync(path.join(root,'.sites-runtime/api-ci-')),databasePath=path.join(state,'test.sqlite'),mailPath=path.join(state,'mail.jsonl');
+const sqlite=new DatabaseSync(databasePath);
+for(const file of readdirSync(path.join(root,'migrations')).filter(f=>/^\d+.*\.sql$/.test(f)).sort())sqlite.exec(readFileSync(path.join(root,'migrations',file),'utf8'));
+sqlite.close();
 const port=await new Promise((resolve,reject)=>{const probe=createServer();probe.once('error',reject);probe.listen(0,'127.0.0.1',()=>{const address=probe.address();probe.close(error=>error?reject(error):resolve(address.port));});});
-const base=`http://127.0.0.1:${port}`;
-const server=spawn(process.execPath,[...prefix,'dev','--config','dist/server/wrangler.json','--local','--persist-to',state,'--ip','127.0.0.1','--inspector-port','0','--port',String(port),'--log-level','warn','--var','WORKSPACE_OWNER_EMAIL:seedy@sites.test','--var','WORKSPACE_INVITE_EMAILS:["colleague@sites.test","second@sites.test"]','--var','APP_MANAGED_INVITES:enabled','--var','INVITE_MAIL_URL:','--var','INVITE_MAIL_SECRET:'],{cwd:root,windowsHide:true,stdio:['ignore','pipe','pipe']});
+const base=`http://127.0.0.1:${port}`,env={...process.env,ARCHIVE_TEST_URL:base,ARCHIVE_TEST_TOKEN:crypto.randomUUID(),ARCHIVE_TEST_DB_PATH:databasePath,ARCHIVE_TEST_MAIL_PATH:mailPath,BETTER_AUTH_SECRET:crypto.randomUUID()+crypto.randomUUID(),BETTER_AUTH_URL:base};
+delete env.VERCEL;
+const server=spawn(process.execPath,['node_modules/next/dist/bin/next','start','-H','127.0.0.1','-p',String(port)],{cwd:root,windowsHide:true,stdio:['ignore','pipe','pipe'],env});
 let serverLog='',closed=false,serverError;
-server.stdout.on('data',chunk=>{serverLog=(serverLog+chunk).slice(-16000);});
-server.stderr.on('data',chunk=>{serverLog=(serverLog+chunk).slice(-16000);});
-server.once('error',error=>{serverError=error;});
-server.once('close',()=>{closed=true;});
+server.stdout.on('data',c=>{serverLog=(serverLog+c).slice(-20000);});server.stderr.on('data',c=>{serverLog=(serverLog+c).slice(-20000);});server.once('error',e=>{serverError=e;});server.once('close',()=>{closed=true;});
 try{
  const deadline=Date.now()+45000;let ready=false;
- while(Date.now()<deadline){
-  if(serverError)throw serverError;if(closed)throw new Error('Local test Worker exited.\n'+serverLog);
-  try{const response=await fetch(base+'/api/state',{signal:AbortSignal.timeout(1000)});if(response.status===401){ready=true;break;}}catch{}
-  await new Promise(resolve=>setTimeout(resolve,250));
- }
- if(!ready)throw new Error('Local test Worker did not become ready.\n'+serverLog);
- await run(['tests/api.integration.mjs'],{env:{...process.env,ARCHIVE_TEST_URL:base}});
-}finally{
- if(!closed){
-  if(process.platform==='win32')spawnSync('taskkill',['/PID',String(server.pid),'/T','/F'],{windowsHide:true,stdio:'ignore'});
-  else server.kill('SIGTERM');
-  const deadline=Date.now()+5000;while(!closed&&Date.now()<deadline)await new Promise(resolve=>setTimeout(resolve,100));
-  if(!closed)server.kill('SIGKILL');
- }
-}
+ while(Date.now()<deadline){if(serverError)throw serverError;if(closed)throw new Error('Local Next server exited.\n'+serverLog);try{const r=await fetch(base+'/api/state',{signal:AbortSignal.timeout(1000)});if(r.status===401){ready=true;break;}}catch{}await new Promise(r=>setTimeout(r,250));}
+ if(!ready)throw new Error('Local server did not become ready.\n'+serverLog);
+ for(const test of ['tests/api.integration.mjs','tests/auth.integration.mjs'])await new Promise((resolve,reject)=>{const child=spawn(process.execPath,[test],{cwd:root,windowsHide:true,stdio:'inherit',env});child.once('error',reject);child.once('close',code=>code===0?resolve():reject(new Error(test+' failed.\n'+serverLog)));});
+}finally{if(!closed){if(process.platform==='win32')spawnSync('taskkill',['/PID',String(server.pid),'/T','/F'],{windowsHide:true,stdio:'ignore'});else server.kill('SIGTERM');}}

@@ -4,7 +4,7 @@ if(!['127.0.0.1','localhost'].includes(new URL(base).hostname))throw new Error('
 const users={owner:{id:'local_seedy',email:'seedy@sites.test'},guest:{id:'local_colleague',email:'colleague@sites.test'},second:{id:'local_second',email:'second@sites.test'},unknown:{id:'local_unknown',email:'unknown@sites.test'}};
 const source='fixture-'+crypto.randomUUID(),personal='PRIVATE_NOTE_'+crypto.randomUUID();let checks=0;
 const check=(ok,message)=>{assert.ok(ok,message);checks++;console.log('PASS '+message);};
-async function request(path,body,who='owner',origin=base){const u=typeof who==='object'?who:users[who],headers={Connection:'close'};if(u){headers['oai-authenticated-user-id']=u.id;headers['oai-authenticated-user-email']=u.email;headers['oai-authenticated-user-full-name']=who==='owner'?'Seedy':'Colleague';}if(body!==undefined){headers.Origin=origin;headers['Content-Type']='application/json';}const r=await fetch(base+'/api/'+path,{method:body===undefined?'GET':'POST',headers,body:body===undefined?undefined:JSON.stringify(body)});return{status:r.status,data:await r.json()};}
+async function request(path,body,who='owner',origin=base){const u=typeof who==='object'?who:users[who],headers={Connection:'close','x-archive-test-token':process.env.ARCHIVE_TEST_TOKEN||''};if(u){headers['oai-authenticated-user-id']=u.id;headers['oai-authenticated-user-email']=u.email;headers['oai-authenticated-user-full-name']=who==='owner'?'Seedy':'Colleague';}if(body!==undefined){headers.Origin=origin;headers['Content-Type']='application/json';}const r=await fetch(base+'/api/'+path,{method:body===undefined?'GET':'POST',headers,body:body===undefined?undefined:JSON.stringify(body)});return{status:r.status,data:await r.json()};}
 const record=(id,title)=>({id,sourceId:source,title,body:'비와 비율 학습 자료',notes:'원본 셀 메모 검색표본',subject:'수학',context:'1학기 4단원',kind:'아이디어',row:20,range:'A20',links:[],sourceUrl:'',raw:[],restricted:false,review:false});
 const records=[record('a-'+source,'비와 비율'),record('b-'+source,'다른 활동')];
 async function start(expected){const res=await request('import/start',{sourceId:source,title:'통합 검증 자료',url:'',expected,summary:[]});assert.equal(res.status,200);return res.data.run;}
@@ -38,12 +38,12 @@ check(reinvited.data.invitation.result==='restored'&&(await request('collections
 check((await request('state',undefined,{...invited,id:'wrong-invited-id'})).status===403,'reinvitation retains original identity binding');
 await request('collections/'+privateMade.data.id,{action:'delete'},invited);
 await request('team',{email:invited.email,action:'revoke'});
-const page=await fetch(base+'/?view=shared',{headers:{'oai-authenticated-user-id':users.unknown.id,'oai-authenticated-user-email':users.unknown.email}});
+const page=await fetch(base+'/?view=shared',{headers:{'x-archive-test-token':process.env.ARCHIVE_TEST_TOKEN||'','oai-authenticated-user-id':users.unknown.id,'oai-authenticated-user-email':users.unknown.email}});
 const deniedPage=await page.text();
 check(deniedPage.includes('초대받은 계정으로 로그인')&&!deniedPage.includes('ARCHIVE LIBRARY')&&!deniedPage.includes('다음 주 수학'),'uninvited page renders access guidance without archive shell or records');
-check(deniedPage.includes('signout-with-chatgpt')&&deniedPage.includes('view%3Dshared'),'account switch preserves shared view return path');
+check(deniedPage.includes('logout')&&deniedPage.includes('view%3Dshared'),'account switch preserves shared view return path');
 const anonymousPage=await fetch(base+'/?view=shared',{redirect:'manual'});
-check([302,303,307,308].includes(anonymousPage.status)&&anonymousPage.headers.get('location')?.includes('signin-with-chatgpt'),'anonymous page requires native sign in');
+check([302,303,307,308].includes(anonymousPage.status)&&anonymousPage.headers.get('location')?.includes('login'),'anonymous page requires email sign in');
 check((await request('state',undefined,'guest')).data.workspace.isAdmin===false,'invited colleague joins without admin rights');
 check((await request('state',undefined,'unknown')).status===403,'uninvited account denied');
 check((await request('state',undefined,{id:'another-id',email:users.guest.email})).status===403,'email binding cannot replace stable user identity');

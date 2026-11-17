@@ -9,11 +9,13 @@
 
 ## 저장소와 배포
 
-이 저장소는 운영 중인 수업서랍의 소스와 변경 이력을 관리합니다. 앱은 Sites의 Cloudflare Worker와 D1 데이터베이스에서 실행합니다. GitHub의 `main`에 코드를 반영한 뒤, 서비스 변경은 기존 Site의 소스 저장·배포 절차로 적용합니다. GitHub에서의 코드 변경만으로 운영 앱이 자동 배포되지는 않습니다.
+GitHub의 **main에 푸시하면 Vercel이 즉시 빌드·운영 배포를 시작**합니다. 성공한 빌드가 새 운영 버전으로 전환되며, 빌드가 실패하면 직전 버전을 유지합니다. 일정 간격으로 확인하는 방식은 사용하지 않습니다.
 
-`.openai/hosting.json`의 기존 `project_id`를 유지해 같은 앱으로 배포합니다. 로그인·자료 저장·메일 발송은 서버 기능이므로 GitHub Pages의 정적 호스팅만으로 실행할 수 없습니다.
+화면과 API는 Next.js + Vercel에서 실행하고, 기존 Sites의 D1 자료 저장소는 서버 전용 HMAC 게이트웨이로 연결합니다. 기존 자료·모음·메모·초대 명단을 그대로 사용합니다. 자료 저장소 역할을 하는 기존 Site와 Gmail Apps Script 배포를 삭제하지 마세요. 자료와 비밀 값은 Git에 포함하지 않습니다.
 
-운영 자료, 개인 모음·메모, 초대 명단, 메일 발송 비밀 값은 런타임에 보관합니다. 저장소에는 소스와 가상 환경변수 예시만 포함합니다.
+프로덕션 환경변수: ARCHIVE_GATEWAY_URL, ARCHIVE_GATEWAY_SECRET, BETTER_AUTH_SECRET, BETTER_AUTH_URL. 비밀 값은 Vercel의 암호화된 설정에만 등록합니다. 미리보기 배포에는 운영 데이터 접근 키를 제공하지 않습니다.
+
+로그인은 초대된 이메일로 받은 10분 유효·1회용 링크를 사용합니다. 검증된 이메일을 기존 사용자 ID에 연결하므로 개인 모음 소유권이 유지됩니다. 외부 요청의 사용자 ID 헤더는 신뢰하지 않습니다.
 
 ## 구현 범위
 
@@ -27,7 +29,7 @@
 - 모음별 개인 준비 메모와 JSON 내보내기
 - 재가져오기 중에는 기존 자료 유지, 완료 후 출처 단위로 교체
 - 원본에서 사라진 모음 자료는 저장본으로 유지
-- ChatGPT 로그인과 사용자별 서버 저장
+- 초대 이메일 로그인 링크와 사용자별 서버 저장
 - 이메일로 동료 초대, 운영자 Gmail을 통한 안내 메일 자동 발송·재발송·발송 상태 표시
 
 사이트는 이메일로 초대한 교사만 이용합니다. 동료는 공용 자료를 읽고 개인 모음을 만들 수 있으며, 선택한 모음만 읽기 전용으로 공유합니다. 개인 준비 메모는 공유되지 않습니다. 비공개 Google 계정 연결, 정기 동기화, 원본 파일 자체 보관은 후속 범위입니다. 초대 운영과 추가 마이그레이션·테스트 방법은 [COLLABORATION.md](COLLABORATION.md)를 확인하세요.
@@ -51,11 +53,11 @@ XLSX 형식은 한 셀 안의 여러 개별 하이퍼링크를 모두 표현하�
 
 ## 구성
 
-- React / TypeScript / Vinext
-- Cloudflare Workers + D1 (SQLite)
+- React / TypeScript / Next.js 16 + Vercel
+- 기존 Cloudflare Worker의 HMAC 게이트웨이 + D1 (SQLite)
 - Drizzle의 SQL 스키마 마이그레이션
 - fflate / fast-xml-parser를 지연 로딩하는 브라우저 XLSX 변환기
-- Sites의 로그인과 서버의 초대 이메일·계정 권한 확인
+- Better Auth 이메일 로그인과 요청마다 초대 상태 확인
 
 데이터는 D1에 저장하며 브라우저 localStorage에 자료·모음을 저장하지 않습니다. 원본 자료와 사용자 데이터는 소스 저장소·배포 번들에 포함하지 않습니다. API는 요청마다 로그인 사용자와 자료 소유자를 확인합니다.
 
@@ -69,40 +71,16 @@ cd Class-Acave
 npm ci --prefer-offline --no-audit --no-fund
 ```
 
-무시되는 로컬 설정 파일 `.dev.vars`를 다음 가상 계정으로 만듭니다. 실제 Gmail 발송 키는 로컬 테스트에 넣지 않습니다.
-
-```dotenv
-WORKSPACE_OWNER_EMAIL="seedy@sites.test"
-WORKSPACE_INVITE_EMAILS='["colleague@sites.test","second@sites.test"]'
-APP_MANAGED_INVITES="enabled"
-```
-
-처음 만드는 로컬 DB에는 세 마이그레이션을 순서대로 적용합니다.
-
-```powershell
-npm run build
-node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1 execute DB --local --config dist/server/wrangler.json --persist-to .wrangler/state --file drizzle/0000_premium_silver_sable.sql
-node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1 execute DB --local --config dist/server/wrangler.json --persist-to .wrangler/state --file drizzle/0001_magenta_winter_soldier.sql
-node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1 execute DB --local --config dist/server/wrangler.json --persist-to .wrangler/state --file drizzle/0002_high_inhumans.sql
-npm run dev -- --port 5173 --hostname 127.0.0.1
-```
-
-최초 로컬 DB에만 위 마이그레이션을 적용합니다. 이미 적용한 SQL을 다시 실행하지 않습니다. 개발 서버의 로그인은 템플릿의 로컬 모의 계정을 사용합니다. 배포본에는 모의 로그인이 포함되지 않습니다.
-
-## 검증
+운영 데이터나 실제 메일 키 없이 다음 명령으로 격리된 로컬 SQLite에서 검증합니다. 테스트 서버는 자동으로 시작·종료하며 가상 메일을 로컬 파일로만 보냅니다.
 
 ```powershell
 npx tsc --noEmit
-node --test tests/importer.test.mjs tests/invitation-mail.test.mjs
+node --test tests/importer.test.mjs tests/invitation-mail.test.mjs tests/data-gateway.test.mjs
 npm run build
-npm start -- --port 8788
+node scripts/test-api-ci.mjs
 ```
 
-별도 터미널에서 다음을 실행합니다. API 통합 검증은 로컬 주소에서만 실행됩니다. 격리된 테스트 사용자와 데이터를 생성합니다.
-
-```powershell
-node tests/api.integration.mjs
-```
+CI도 같은 검증을 실행합니다. 합성 사용자 헤더는 서버에 설정된 무작위 테스트 키가 일치하는 로컬 환경에서만 허용되며, Vercel에서는 비활성화됩니다.
 
 실제 엑셀 파일을 함께 검증하려면 `ARCHIVE_FIXTURE` 환경변수에 해당 파일의 절대 경로를 지정합니다. 자료 파일은 저장소에 포함하지 않습니다.
 
@@ -111,7 +89,9 @@ node tests/api.integration.mjs
 - `app/components/archive-app.tsx`: 검색·자료 상세·가져오기·모음 UI
 - `app/api/[...path]/route.ts`: 인증, 자료 가져오기, 검색, 모음 API
 - `lib/importer.mjs`: XLSX와 CellData 변환
-- `db/schema.ts`, `drizzle/`: 저장 구조와 마이그레이션
+- `db/schema.ts`, `db/auth-schema.ts`, `migrations/`: 현재 저장 구조와 추가 마이그레이션
+- `drizzle/`: 기존 Sites 데이터 저장소의 변경하지 않는 초기 이력
+- `scripts/migrate-remote.mjs`: 운영 빌드 후 추가 테이블만 적용; 기존 자료 삭제·변경 SQL은 차단
 - `tests/`: 변환·API 통합 검증
 - `.openai/hosting.json`: 동일 Site의 배포 ID와 저장소 선언
 

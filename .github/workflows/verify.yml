@@ -32,7 +32,7 @@ jobs:
         run: npx tsc --noEmit
       - name: Import and invitation mail tests
         run: node --test tests/importer.test.mjs tests/invitation-mail.test.mjs tests/data-gateway.test.mjs
-      - name: Build Worker
+      - name: Build Next.js app
         run: npm run build
-      - name: API and collaboration tests
+      - name: API collaboration and real session tests
         run: node scripts/test-api-ci.mjs

@@ -22,6 +22,12 @@ function bridge({quota=100,sendError=false}={}){
  return{sent,invoke,sign,transport:async(_url,options)=>Response.json(invoke(JSON.parse(options.body)))};
 }
 const target=()=>({id:randomUUID(),email:'teacher@example.com',timestamp:Date.now()});
+test('login mail uses signed app origin and rejects a foreign token destination',()=>{
+ const b=bridge(),appUrl='https://archive.example.com',data={...target(),kind:'login',appUrl,loginUrl:appUrl+'/api/auth/magic-link/verify?token=local-test&callbackURL=%2F'};
+ assert.equal(b.invoke(b.sign(data)).status,'sent');assert.match(b.sent[0].subject,/로그인 링크/);assert.ok(b.sent[0].body.includes(data.loginUrl));
+ assert.equal(b.invoke(b.sign({...data,id:randomUUID(),loginUrl:'https://evil.example/api/auth/magic-link/verify?token=x'})).code,'invalid_request');assert.equal(b.sent.length,1);
+ const invite={...target(),appUrl};assert.equal(b.invoke(b.sign(invite)).status,'sent');assert.ok(b.sent[1].body.includes(appUrl+'/?view=shared'));
+});
 test('bridge rejects unsigned tampered expired and multiple-recipient requests without sending',()=>{
  const b=bridge(),data=target();assert.equal(b.invoke({payload:JSON.stringify(data),signature:'0'.repeat(64)}).status,'failed');
  const changed=b.sign(data);changed.payload=JSON.stringify({...data,email:'attacker@example.com'});assert.equal(b.invoke(changed).code,'authorization');

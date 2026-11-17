@@ -1,4 +1,4 @@
-import {env} from 'cloudflare:workers';
+import {getRuntime} from '@/lib/runtime';
 import {z} from 'zod';
 import {getChatGPTUser} from '../../chatgpt-auth';
 import {normalize,googleId} from '@/lib/importer.mjs';
@@ -16,6 +16,7 @@ export async function GET(request:Request){return handle(request);}
 export async function POST(request:Request){return handle(request);}
 async function handle(request:Request){
  try{
+  const env=await getRuntime();
   const user=await getChatGPTUser();if(!user)return json({error:'로그인 후 이용해 주세요.'},401);
   if(!env.DB)return json({error:'자료 저장소가 준비되지 않았습니다.'},503);
   const db=env.DB,owner=user.userId,url=new URL(request.url),path=decodeURIComponent(url.pathname.slice(5));
@@ -25,7 +26,7 @@ async function handle(request:Request){
   let b:any={};
   if(request.method==='POST'){
     const text=await request.text();if(text.length>2500000)return json({error:'한 번에 전송하는 자료가 너무 큽니다.'},413);
-    if(request.headers.get('Origin')!==url.origin)return json({error:'같은 사이트에서 다시 시도해 주세요.'},403);
+    if(request.headers.get('Origin')!==(process.env.BETTER_AUTH_URL|| (process.env.VERCEL_PROJECT_PRODUCTION_URL?'https://'+process.env.VERCEL_PROJECT_PRODUCTION_URL:url.origin)))return json({error:'같은 사이트에서 다시 시도해 주세요.'},403);
     if(!request.headers.get('Content-Type')?.startsWith('application/json'))return json({error:'JSON 요청이 필요합니다.'},415);
     b=JSON.parse(text);
   }

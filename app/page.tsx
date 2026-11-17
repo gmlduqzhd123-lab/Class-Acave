@@ -1,5 +1,5 @@
 import ArchiveApp from './components/archive-app';
-import {env} from 'cloudflare:workers';
+import {getRuntime} from '@/lib/runtime';
 import {requireChatGPTUser,chatGPTSignOutPath} from './chatgpt-auth';
 import {workspaceFor} from '@/lib/workspace';
 export const dynamic='force-dynamic';
@@ -11,6 +11,7 @@ export default async function Home({searchParams}:{searchParams:Promise<Record<s
 async function AuthenticatedHome({returnTo}:{returnTo:string}){
  const user=await requireChatGPTUser(returnTo);
  try{
+  const env=await getRuntime();
   if(!env.DB)throw new Error('unavailable');
   await workspaceFor(env.DB,user,env);
  }catch(error:unknown){
