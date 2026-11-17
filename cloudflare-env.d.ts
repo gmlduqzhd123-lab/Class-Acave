@@ -7,5 +7,6 @@ declare namespace Cloudflare {
     APP_MANAGED_INVITES?: string;
     INVITE_MAIL_URL?: string;
     INVITE_MAIL_SECRET?: string;
+    ARCHIVE_GATEWAY_SECRET?: string;
   }
 }
