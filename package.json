@@ -2,6 +2,11 @@
   "name": "site-creator-vinext-starter",
   "version": "0.1.0",
   "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gmlduqzhd123-lab/Class-Acave.git"
+  },
+  "homepage": "https://classroom-drawer-6-20261113.asdad123asd.chatgpt.site",
   "engines": {
     "node": ">=22.13.0"
   },

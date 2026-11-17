@@ -1,6 +1,19 @@
-# 수업서랍 MVP
+# 수업서랍 · Class-Acave
 
 6학년 수업·업무 자료를 가져와 검색하고, 수업별 모음으로 정리하는 웹앱입니다.
+
+- [수업서랍 실행](https://classroom-drawer-6-20261113.asdad123asd.chatgpt.site)
+- [GitHub 저장소](https://github.com/gmlduqzhd123-lab/Class-Acave)
+- [동료 초대·모음 공유 안내](COLLABORATION.md)
+- [Gmail 자동 초대 메일 연결](integrations/google-mail/README.md)
+
+## 저장소와 배포
+
+이 저장소는 운영 중인 수업서랍의 소스와 변경 이력을 관리합니다. 앱은 Sites의 Cloudflare Worker와 D1 데이터베이스에서 실행합니다. GitHub의 `main`에 코드를 반영한 뒤, 서비스 변경은 기존 Site의 소스 저장·배포 절차로 적용합니다. GitHub에서의 코드 변경만으로 운영 앱이 자동 배포되지는 않습니다.
+
+`.openai/hosting.json`의 기존 `project_id`를 유지해 같은 앱으로 배포합니다. 로그인·자료 저장·메일 발송은 서버 기능이므로 GitHub Pages의 정적 호스팅만으로 실행할 수 없습니다.
+
+운영 자료, 개인 모음·메모, 초대 명단, 메일 발송 비밀 값은 런타임에 보관합니다. 저장소에는 소스와 가상 환경변수 예시만 포함합니다.
 
 ## 구현 범위
 
@@ -48,12 +61,29 @@ XLSX 형식은 한 셀 안의 여러 개별 하이퍼링크를 모두 표현하�
 
 ## 개발 실행
 
-Node.js 22.13 이상이 필요합니다. 명령은 이 디렉터리에서 실행합니다.
+Node.js 24 LTS를 사용합니다. 명령은 저장소 디렉터리에서 실행합니다.
 
 ```powershell
+git clone https://github.com/gmlduqzhd123-lab/Class-Acave.git
+cd Class-Acave
 npm ci --prefer-offline --no-audit --no-fund
+```
+
+무시되는 로컬 설정 파일 `.dev.vars`를 다음 가상 계정으로 만듭니다. 실제 Gmail 발송 키는 로컬 테스트에 넣지 않습니다.
+
+```dotenv
+WORKSPACE_OWNER_EMAIL="seedy@sites.test"
+WORKSPACE_INVITE_EMAILS='["colleague@sites.test","second@sites.test"]'
+APP_MANAGED_INVITES="enabled"
+```
+
+처음 만드는 로컬 DB에는 세 마이그레이션을 순서대로 적용합니다.
+
+```powershell
 npm run build
 node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1 execute DB --local --config dist/server/wrangler.json --persist-to .wrangler/state --file drizzle/0000_premium_silver_sable.sql
+node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1 execute DB --local --config dist/server/wrangler.json --persist-to .wrangler/state --file drizzle/0001_magenta_winter_soldier.sql
+node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1 execute DB --local --config dist/server/wrangler.json --persist-to .wrangler/state --file drizzle/0002_high_inhumans.sql
 npm run dev -- --port 5173 --hostname 127.0.0.1
 ```
 
@@ -63,7 +93,7 @@ npm run dev -- --port 5173 --hostname 127.0.0.1
 
 ```powershell
 npx tsc --noEmit
-node --test tests/importer.test.mjs
+node --test tests/importer.test.mjs tests/invitation-mail.test.mjs
 npm run build
 npm start -- --port 8788
 ```
