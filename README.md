@@ -2,7 +2,7 @@
 
 6학년 수업·업무 자료를 가져와 검색하고, 수업별 모음으로 정리하는 웹앱입니다.
 
-- [수업서랍 실행](https://classroom-drawer-6-20261113.asdad123asd.chatgpt.site)
+- [수업서랍 실행](https://class-acave.vercel.app)
 - [GitHub 저장소](https://github.com/gmlduqzhd123-lab/Class-Acave)
 - [동료 초대·모음 공유 안내](COLLABORATION.md)
 - [Gmail 자동 초대 메일 연결](integrations/google-mail/README.md)

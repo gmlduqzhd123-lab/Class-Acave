@@ -6,9 +6,9 @@
     "type": "git",
     "url": "git+https://github.com/gmlduqzhd123-lab/Class-Acave.git"
   },
-  "homepage": "https://classroom-drawer-6-20261113.asdad123asd.chatgpt.site",
+  "homepage": "https://class-acave.vercel.app",
   "engines": {
-    "node": ">=22.13.0"
+    "node": "24.x"
   },
   "scripts": {
     "install:ci": "node scripts/install-ci.mjs",

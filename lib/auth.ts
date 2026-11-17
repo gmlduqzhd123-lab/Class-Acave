@@ -26,4 +26,3 @@ async function createAuth(){
 }
 let authPromise:ReturnType<typeof createAuth>|undefined;
 export function getAuth(){return authPromise??=(createAuth().catch(error=>{authPromise=undefined;throw error;}));}
-
